@@ -1,5 +1,6 @@
 using backend.Infrastructure.Firebase;
 using backend.Modules.Auth;
+using backend.Modules.Music;
 using DotNetEnv;
 
 // Load environment variables from .env file
@@ -30,6 +31,7 @@ builder.Services.AddSingleton<FirebaseService>();
 
 // Register Modules
 builder.Services.AddAuthModule();
+builder.Services.AddMusicModule();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
