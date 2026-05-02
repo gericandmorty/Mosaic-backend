@@ -88,4 +88,5 @@ public class AuthService : IAuthService
 
         return new AuthResponse(token, firebaseUser.Email, displayName, firebaseUser.Uid);
     }
+
 }

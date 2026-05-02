@@ -22,6 +22,8 @@ public class LoginRequest
     [JsonPropertyName("password")]
     public string Password { get; set; } = string.Empty;
 }
+
+
 public record AuthResponse(
     [property: JsonPropertyName("token")] string Token, 
     [property: JsonPropertyName("email")] string Email, 
