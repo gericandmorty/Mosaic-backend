@@ -1,0 +1,29 @@
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.sln.docstates
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment Variables (CRITICAL: Do not commit these)
+.env
+.env.*
+
+# User-specific files
+*.user
+*.userosscache
+*.sln.docstates
+
+# Operating System Files
+Thumbs.db
+Desktop.ini
+
+# Firebase / Service Accounts
+*-firebase-adminsdk-*.json
