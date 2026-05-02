@@ -52,16 +52,35 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
-        // NOTE: Firebase Auth login is typically done on the client side.
-        // On the backend, we can verify the user and issue a Custom Token.
-        
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
-        if (user == null)
+        // 1. Check Firebase first
+        UserRecord firebaseUser;
+        try 
         {
-            throw new Exception("User not found.");
+            firebaseUser = await _firebaseAuth.GetUserByEmailAsync(request.Email);
+        }
+        catch
+        {
+            throw new Exception("User not found in Firebase.");
         }
 
-        // Generate a real Firebase Custom Token (JWT)
+        // 2. Sync with local DB
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.FirebaseUid == firebaseUser.Uid);
+        if (user == null)
+        {
+            user = new User
+            {
+                Id = Guid.NewGuid(),
+                FirebaseUid = firebaseUser.Uid,
+                Email = firebaseUser.Email,
+                DisplayName = firebaseUser.DisplayName ?? firebaseUser.Email,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+        }
+
+        // 3. Generate a real Firebase Custom Token (JWT)
         var token = await _firebaseAuth.CreateCustomTokenAsync(user.FirebaseUid);
 
         return new AuthResponse(token, user.Email, user.DisplayName, user.FirebaseUid);
