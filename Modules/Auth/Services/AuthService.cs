@@ -1,26 +1,25 @@
 using FirebaseAdmin.Auth;
-using backend.Data;
+using Google.Cloud.Firestore;
 using backend.Models;
 using backend.Modules.Auth.DTOs;
 using backend.Modules.Auth.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace backend.Modules.Auth.Services;
 
 public class AuthService : IAuthService
 {
-    private readonly AppDbContext _context;
     private readonly FirebaseAuth _firebaseAuth;
+    private readonly FirestoreDb _firestore;
 
-    public AuthService(AppDbContext context, Infrastructure.Firebase.FirebaseService firebaseService)
+    public AuthService(Infrastructure.Firebase.FirebaseService firebaseService)
     {
-        _context = context;
         _firebaseAuth = firebaseService.GetAuth();
+        _firestore = firebaseService.GetFirestore();
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
     {
-        // 1. Create user in Firebase
+        // 1. Create user in Firebase Auth
         var userArgs = new UserRecordArgs
         {
             Email = request.Email,
@@ -30,40 +29,64 @@ public class AuthService : IAuthService
 
         var userRecord = await _firebaseAuth.CreateUserAsync(userArgs);
 
-        // 2. Create user in our local DB
-        var user = new User
+        // 2. Create user in Firestore
+        var userDoc = _firestore.Collection("users").Document(userRecord.Uid);
+        var userData = new Dictionary<string, object>
         {
-            Id = Guid.NewGuid(),
-            FirebaseUid = userRecord.Uid,
-            Email = request.Email,
-            DisplayName = request.DisplayName,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            { "email", request.Email },
+            { "displayName", request.DisplayName ?? "" },
+            { "firebaseUid", userRecord.Uid },
+            { "createdAt", Timestamp.FromDateTime(DateTime.UtcNow) }
         };
 
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        await userDoc.SetAsync(userData);
 
         // 3. Generate a real Firebase Custom Token (JWT)
-        var token = await _firebaseAuth.CreateCustomTokenAsync(user.FirebaseUid);
+        var token = await _firebaseAuth.CreateCustomTokenAsync(userRecord.Uid);
 
-        return new AuthResponse(token, user.Email, user.DisplayName, user.FirebaseUid);
+        return new AuthResponse(token, request.Email, request.DisplayName, userRecord.Uid);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
-        // NOTE: Firebase Auth login is typically done on the client side.
-        // On the backend, we can verify the user and issue a Custom Token.
-        
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
-        if (user == null)
+        // 1. Check Firebase first
+        UserRecord firebaseUser;
+        try 
         {
-            throw new Exception("User not found.");
+            firebaseUser = await _firebaseAuth.GetUserByEmailAsync(request.Email);
+        }
+        catch
+        {
+            throw new Exception("User not found in Firebase.");
         }
 
-        // Generate a real Firebase Custom Token (JWT)
-        var token = await _firebaseAuth.CreateCustomTokenAsync(user.FirebaseUid);
+        // 2. Fetch from Firestore
+        var userDoc = _firestore.Collection("users").Document(firebaseUser.Uid);
+        var snapshot = await userDoc.GetSnapshotAsync();
 
-        return new AuthResponse(token, user.Email, user.DisplayName, user.FirebaseUid);
+        string displayName = firebaseUser.DisplayName ?? firebaseUser.Email;
+
+        if (!snapshot.Exists)
+        {
+            // Auto-sync: Create Firestore doc if it doesn't exist but Auth does
+            var userData = new Dictionary<string, object>
+            {
+                { "email", firebaseUser.Email },
+                { "displayName", displayName },
+                { "firebaseUid", firebaseUser.Uid },
+                { "createdAt", Timestamp.FromDateTime(DateTime.UtcNow) }
+            };
+            await userDoc.SetAsync(userData);
+        }
+        else 
+        {
+            displayName = snapshot.GetValue<string>("displayName");
+        }
+
+        // 3. Generate a real Firebase Custom Token (JWT)
+        var token = await _firebaseAuth.CreateCustomTokenAsync(firebaseUser.Uid);
+
+        return new AuthResponse(token, firebaseUser.Email, displayName, firebaseUser.Uid);
     }
+
 }

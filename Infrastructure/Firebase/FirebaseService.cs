@@ -1,6 +1,6 @@
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
-using FirebaseAdmin.Auth;
+using Google.Cloud.Firestore;
 using Newtonsoft.Json;
 
 namespace backend.Infrastructure.Firebase;
@@ -8,6 +8,7 @@ namespace backend.Infrastructure.Firebase;
 public class FirebaseService
 {
     private readonly FirebaseApp _app;
+    private readonly FirestoreDb _firestore;
 
     public FirebaseService()
     {
@@ -37,11 +38,20 @@ public class FirebaseService
 
         var json = JsonConvert.SerializeObject(config);
 
+        var credential = GoogleCredential.FromJson(json);
+
         _app = FirebaseApp.Create(new AppOptions
         {
-            Credential = GoogleCredential.FromJson(json)
+            Credential = credential
         });
+
+        _firestore = new FirestoreDbBuilder
+        {
+            ProjectId = projectId,
+            Credential = credential
+        }.Build();
     }
 
-    public FirebaseAuth GetAuth() => FirebaseAuth.GetAuth(_app);
+    public FirebaseAdmin.Auth.FirebaseAuth GetAuth() => FirebaseAdmin.Auth.FirebaseAuth.GetAuth(_app);
+    public FirestoreDb GetFirestore() => _firestore;
 }
