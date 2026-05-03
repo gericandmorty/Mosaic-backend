@@ -8,6 +8,7 @@ namespace backend.Modules.Music.Controllers
     public class MusicController : ControllerBase
     {
         private readonly IMusicService _musicService;
+        private static readonly HttpClient _httpClient = new HttpClient();
 
         public MusicController(IMusicService musicService)
         {
@@ -27,15 +28,46 @@ namespace backend.Modules.Music.Controllers
         }
 
         [HttpGet("stream/{id}")]
-        public async Task<IActionResult> GetStream(string id)
+        public IActionResult GetStream(string id)
+        {
+            // Instead of giving the raw YouTube URL (which is IP-locked), 
+            // we point the app to our own 'play' endpoint.
+            var proxyUrl = $"{Request.Scheme}://{Request.Host}/api/music/play/{id}";
+            return Ok(new { url = proxyUrl });
+        }
+
+        [HttpGet("play/{id}")]
+        public async Task ProxyStream(string id)
         {
             var url = await _musicService.GetAudioStreamUrlAsync(id);
-            if (string.IsNullOrEmpty(url))
-            {
-                return NotFound("Stream not found.");
+            if (string.IsNullOrEmpty(url)) {
+                Response.StatusCode = 404;
+                return;
             }
 
-            return Ok(new { url });
+            try {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                
+                if (Request.Headers.ContainsKey("Range")) {
+                    request.Headers.Add("Range", Request.Headers["Range"].ToString());
+                }
+
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                
+                Response.StatusCode = (int)response.StatusCode;
+                foreach (var header in response.Content.Headers) {
+                    Response.Headers[header.Key] = header.Value.ToArray();
+                }
+                
+                if (!Response.Headers.ContainsKey("Content-Type")) {
+                    Response.ContentType = "audio/mpeg";
+                }
+
+                await response.Content.CopyToAsync(Response.Body);
+            } catch (Exception ex) {
+                Console.WriteLine($"Streaming error: {ex.Message}");
+                if (!Response.HasStarted) Response.StatusCode = 500;
+            }
         }
 
         [HttpGet("{id}")]
