@@ -37,19 +37,36 @@ namespace backend.Modules.Music.Controllers
         }
 
         [HttpGet("play/{id}")]
-        public async Task<IActionResult> ProxyStream(string id)
+        public async Task ProxyStream(string id)
         {
             var url = await _musicService.GetAudioStreamUrlAsync(id);
-            if (string.IsNullOrEmpty(url)) return NotFound();
+            if (string.IsNullOrEmpty(url)) {
+                Response.StatusCode = 404;
+                return;
+            }
 
             try {
-                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                var stream = await response.Content.ReadAsStreamAsync();
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
                 
-                return File(stream, "audio/mpeg", enableRangeProcessing: true);
+                if (Request.Headers.ContainsKey("Range")) {
+                    request.Headers.Add("Range", Request.Headers["Range"].ToString());
+                }
+
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                
+                Response.StatusCode = (int)response.StatusCode;
+                foreach (var header in response.Content.Headers) {
+                    Response.Headers[header.Key] = header.Value.ToArray();
+                }
+                
+                if (!Response.Headers.ContainsKey("Content-Type")) {
+                    Response.ContentType = "audio/mpeg";
+                }
+
+                await response.Content.CopyToAsync(Response.Body);
             } catch (Exception ex) {
                 Console.WriteLine($"Streaming error: {ex.Message}");
-                return StatusCode(500);
+                if (!Response.HasStarted) Response.StatusCode = 500;
             }
         }
 
