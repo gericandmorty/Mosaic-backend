@@ -28,7 +28,8 @@ public record AuthResponse(
     [property: JsonPropertyName("token")] string Token, 
     [property: JsonPropertyName("email")] string Email, 
     [property: JsonPropertyName("displayName")] string? DisplayName, 
-    [property: JsonPropertyName("firebaseUid")] string FirebaseUid
+    [property: JsonPropertyName("firebaseUid")] string FirebaseUid,
+    [property: JsonPropertyName("photoUrl")] string? PhotoUrl
 );
 
 public class ForgotPasswordRequest

@@ -3,6 +3,11 @@ using Google.Cloud.Firestore;
 using backend.Models;
 using backend.Modules.Auth.DTOs;
 using backend.Modules.Auth.Interfaces;
+using System.Text.Json;
+using System.Text;
+using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace backend.Modules.Auth.Services;
 
@@ -11,12 +16,43 @@ public class AuthService : IAuthService
     private readonly FirebaseAuth _firebaseAuth;
     private readonly FirestoreDb _firestore;
     private readonly IEmailService _emailService;
+    private readonly string _jwtSecret;
+    private readonly string _jwtIssuer;
+    private readonly string _jwtAudience;
 
     public AuthService(Infrastructure.Firebase.FirebaseService firebaseService, IEmailService emailService)
     {
         _firebaseAuth = firebaseService.GetAuth();
         _firestore = firebaseService.GetFirestore();
         _emailService = emailService;
+        _jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? throw new Exception("JWT_SECRET not configured");
+        _jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "MosaicBackend";
+        _jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "MosaicApp";
+    }
+
+    private string GenerateJwtToken(string userId, string email, string? displayName, string? photoUrl)
+    {
+        var claims = new List<Claim>
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId),
+            new Claim(ClaimTypes.Email, email),
+            new Claim("displayName", displayName ?? ""),
+            new Claim("photoUrl", photoUrl ?? ""),
+            new Claim("firebase_uid", userId) // Keep for compatibility
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSecret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _jwtIssuer,
+            audience: _jwtAudience,
+            claims: claims,
+            expires: DateTime.Now.AddDays(7),
+            signingCredentials: creds
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
@@ -29,7 +65,7 @@ public class AuthService : IAuthService
         }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
-            // Email available, proceed normally
+            // Email available
         }
 
         if (existingUser != null)
@@ -40,7 +76,6 @@ public class AuthService : IAuthService
                 throw new Exception("This email is already registered. Try logging in!");
             }
             
-            // User exists but is NOT verified. Let's treat this as a "resend code" request.
             var newCode = new Random().Next(100000, 999999).ToString();
             await existingDoc.Reference.UpdateAsync(new Dictionary<string, object>
             {
@@ -48,9 +83,7 @@ public class AuthService : IAuthService
             });
 
             await _emailService.SendVerificationEmailAsync(request.Email, newCode);
-            
-            // Return success so frontend navigates to verification screen
-            return new AuthResponse("", request.Email, existingUser.DisplayName, existingUser.Uid);
+            return new AuthResponse("", request.Email, existingUser.DisplayName, existingUser.Uid, existingUser.PhotoUrl);
         }
 
         // 2. Create user in Firebase Auth
@@ -62,8 +95,6 @@ public class AuthService : IAuthService
         };
 
         var userRecord = await _firebaseAuth.CreateUserAsync(userArgs);
-
-        // 2. Generate 6-digit verification code
         var verificationCode = new Random().Next(100000, 999999).ToString();
 
         // 3. Create user in Firestore
@@ -79,14 +110,12 @@ public class AuthService : IAuthService
         };
 
         await userDoc.SetAsync(userData);
-
-        // 4. Send Verification Email
         await _emailService.SendVerificationEmailAsync(request.Email, verificationCode);
 
-        // 5. Generate a real Firebase Custom Token (JWT)
-        var token = await _firebaseAuth.CreateCustomTokenAsync(userRecord.Uid);
+        // 4. Generate Local JWT
+        var token = GenerateJwtToken(userRecord.Uid, request.Email, request.DisplayName, userRecord.PhotoUrl);
 
-        return new AuthResponse(token, request.Email, request.DisplayName, userRecord.Uid);
+        return new AuthResponse(token, request.Email, request.DisplayName, userRecord.Uid, userRecord.PhotoUrl);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
@@ -107,10 +136,10 @@ public class AuthService : IAuthService
         var snapshot = await userDoc.GetSnapshotAsync();
 
         string displayName = firebaseUser.DisplayName ?? firebaseUser.Email;
+        string? photoUrl = firebaseUser.PhotoUrl;
 
         if (!snapshot.Exists)
         {
-            // Auto-sync: Create Firestore doc if it doesn't exist but Auth does
             var userData = new Dictionary<string, object>
             {
                 { "email", firebaseUser.Email },
@@ -123,12 +152,13 @@ public class AuthService : IAuthService
         else 
         {
             displayName = snapshot.GetValue<string>("displayName");
+            photoUrl = snapshot.ContainsField("photoUrl") ? snapshot.GetValue<string>("photoUrl") : firebaseUser.PhotoUrl;
         }
 
-        // 3. Generate a real Firebase Custom Token (JWT)
-        var token = await _firebaseAuth.CreateCustomTokenAsync(firebaseUser.Uid);
+        // 3. Generate Local JWT
+        var token = GenerateJwtToken(firebaseUser.Uid, firebaseUser.Email, displayName, photoUrl);
 
-        return new AuthResponse(token, firebaseUser.Email, displayName, firebaseUser.Uid);
+        return new AuthResponse(token, firebaseUser.Email, displayName, firebaseUser.Uid, photoUrl);
     }
 
     public async Task RequestPasswordResetAsync(string email)
@@ -136,9 +166,8 @@ public class AuthService : IAuthService
         var userRecord = await _firebaseAuth.GetUserByEmailAsync(email);
         if (userRecord == null) return;
 
-        // Generate a 6-digit code
         var code = new Random().Next(100000, 999999).ToString();
-        var expiresAt = DateTime.UtcNow.AddMinutes(15); // Code expires in 15 mins
+        var expiresAt = DateTime.UtcNow.AddMinutes(15);
 
         var userDoc = _firestore.Collection("users").Document(userRecord.Uid);
         await userDoc.UpdateAsync(new Dictionary<string, object>
@@ -163,7 +192,6 @@ public class AuthService : IAuthService
         }
 
         var userDoc = snapshot.Documents[0];
-
         var expiresAt = userDoc.GetValue<Timestamp>("resetTokenExpiresAt").ToDateTime();
         if (expiresAt < DateTime.UtcNow) throw new Exception("This code has expired. Please request a new one.");
 
@@ -198,7 +226,7 @@ public class AuthService : IAuthService
         await userDoc.Reference.UpdateAsync(new Dictionary<string, object>
         {
             { "isEmailVerified", true },
-            { "verificationCode", FieldValue.Delete } // Remove code after use
+            { "verificationCode", FieldValue.Delete }
         });
     }
 

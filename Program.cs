@@ -2,6 +2,7 @@ using backend.Infrastructure.Firebase;
 using backend.Modules.Auth;
 using backend.Modules.Music;
 using backend.Modules.History;
+using backend.Modules.Users;
 using DotNetEnv;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -60,14 +61,19 @@ if (string.IsNullOrEmpty(projectId))
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.Authority = $"https://securetoken.google.com/{projectId}";
+        var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? "fallback_secret_for_development_only";
+        var issuer = Environment.GetEnvironmentVariable("JWT_ISSUER");
+        var audience = Environment.GetEnvironmentVariable("JWT_AUDIENCE");
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = $"https://securetoken.google.com/{projectId}",
+            ValidIssuer = issuer,
             ValidateAudience = true,
-            ValidAudience = projectId,
-            ValidateLifetime = true
+            ValidAudience = audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSecret))
         };
     });
 
@@ -75,6 +81,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthModule();
 builder.Services.AddMusicModule();
 builder.Services.AddHistoryModule();
+builder.Services.AddUserModule();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
