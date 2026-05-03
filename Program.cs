@@ -5,6 +5,8 @@ using backend.Modules.History;
 using DotNetEnv;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 // Load environment variables from .env file
 Env.Load();
@@ -28,11 +30,33 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Add Rate Limiting (The Shield)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Request.Headers["X-Firebase-Uid"].ToString() ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 10,
+                QueueLimit = 2,
+                Window = TimeSpan.FromSeconds(10)
+            }));
+});
+
 
 // Register Infrastructure
 builder.Services.AddSingleton<FirebaseService>();
 
 var projectId = Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID");
+if (string.IsNullOrEmpty(projectId))
+{
+    Console.WriteLine("CRITICAL ERROR: FIREBASE_PROJECT_ID environment variable is missing!");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -62,6 +86,7 @@ if (app.Environment.IsDevelopment())
 // app.UseHttpsRedirection();
 
 app.UseCors("AllowAll");
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
