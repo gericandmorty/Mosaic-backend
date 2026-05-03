@@ -23,4 +23,10 @@
     <PackageReference Include="YoutubeExplode" Version="6.6.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Modules\Auth\Templates\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
