@@ -8,6 +8,7 @@ namespace backend.Modules.Music.Controllers
     public class MusicController : ControllerBase
     {
         private readonly IMusicService _musicService;
+        private static readonly HttpClient _httpClient = new HttpClient();
 
         public MusicController(IMusicService musicService)
         {
@@ -27,15 +28,29 @@ namespace backend.Modules.Music.Controllers
         }
 
         [HttpGet("stream/{id}")]
-        public async Task<IActionResult> GetStream(string id)
+        public IActionResult GetStream(string id)
+        {
+            // Instead of giving the raw YouTube URL (which is IP-locked), 
+            // we point the app to our own 'play' endpoint.
+            var proxyUrl = $"{Request.Scheme}://{Request.Host}/api/music/play/{id}";
+            return Ok(new { url = proxyUrl });
+        }
+
+        [HttpGet("play/{id}")]
+        public async Task<IActionResult> ProxyStream(string id)
         {
             var url = await _musicService.GetAudioStreamUrlAsync(id);
-            if (string.IsNullOrEmpty(url))
-            {
-                return NotFound("Stream not found.");
-            }
+            if (string.IsNullOrEmpty(url)) return NotFound();
 
-            return Ok(new { url });
+            try {
+                var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                var stream = await response.Content.ReadAsStreamAsync();
+                
+                return File(stream, "audio/mpeg", enableRangeProcessing: true);
+            } catch (Exception ex) {
+                Console.WriteLine($"Streaming error: {ex.Message}");
+                return StatusCode(500);
+            }
         }
 
         [HttpGet("{id}")]
