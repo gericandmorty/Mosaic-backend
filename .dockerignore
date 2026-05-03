@@ -1,0 +1,12 @@
+bin/
+obj/
+out/
+.git/
+.env
+.vscode/
+.vs/
+*.user
+*.suo
+*.sln.dotsettings
+*.db
+*.log

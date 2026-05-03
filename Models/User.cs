@@ -18,6 +18,12 @@ public class User
     
     public string? PhotoUrl { get; set; }
     
+    public bool IsEmailVerified { get; set; } = false;
+    public string? VerificationToken { get; set; }
+    
+    public string? ResetPasswordToken { get; set; }
+    public DateTime? ResetTokenExpiresAt { get; set; }
+    
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
