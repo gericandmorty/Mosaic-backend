@@ -30,9 +30,16 @@ namespace backend.Modules.Music.Controllers
         [HttpGet("stream/{id}")]
         public IActionResult GetStream(string id)
         {
-            // Instead of giving the raw YouTube URL (which is IP-locked), 
-            // we point the app to our own 'play' endpoint.
-            var proxyUrl = $"{Request.Scheme}://{Request.Host}/api/music/play/{id}";
+            // Detect if we are behind a proxy (like Render) and use HTTPS if so
+            var scheme = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? Request.Scheme;
+            
+            // If we're on a production-like host and it's still http, force https for iOS compatibility
+            if (!Request.Host.Host.Contains("localhost") && !Request.Host.Host.Contains("192.168") && scheme == "http")
+            {
+                scheme = "https";
+            }
+
+            var proxyUrl = $"{scheme}://{Request.Host}/api/music/play/{id}";
             return Ok(new { url = proxyUrl });
         }
 
