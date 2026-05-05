@@ -12,7 +12,8 @@ namespace backend.Modules.Music.Services
 
         public YoutubeMusicService()
         {
-            var handler = new HttpClientHandler { UseCookies = true };
+            // UseCookies MUST be false, otherwise .NET ignores our manual Cookie header
+            var handler = new HttpClientHandler { UseCookies = false };
             var httpClient = new HttpClient(handler);
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
             
