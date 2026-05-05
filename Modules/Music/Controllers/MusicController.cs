@@ -28,19 +28,15 @@ namespace backend.Modules.Music.Controllers
         }
 
         [HttpGet("stream/{id}")]
-        public IActionResult GetStream(string id)
+        public async Task<IActionResult> GetStream(string id)
         {
-            // Detect if we are behind a proxy (like Render) and use HTTPS if so
-            var scheme = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? Request.Scheme;
-            
-            // If we're on a production-like host and it's still http, force https for iOS compatibility
-            if (!Request.Host.Host.Contains("localhost") && !Request.Host.Host.Contains("192.168") && scheme == "http")
+            var url = await _musicService.GetAudioStreamUrlAsync(id);
+            if (string.IsNullOrEmpty(url))
             {
-                scheme = "https";
+                return NotFound("Could not extract stream URL.");
             }
 
-            var proxyUrl = $"{scheme}://{Request.Host}/api/music/play/{id}";
-            return Ok(new { url = proxyUrl });
+            return Ok(new { url = url });
         }
 
         [HttpGet("play/{id}")]
