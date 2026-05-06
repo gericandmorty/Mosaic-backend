@@ -8,7 +8,11 @@ namespace backend.Modules.Music.Controllers
     public class MusicController : ControllerBase
     {
         private readonly IMusicService _musicService;
-        private static readonly HttpClient _httpClient = new HttpClient();
+        private static readonly HttpClient _httpClient = new HttpClient(new HttpClientHandler 
+        { 
+            UseCookies = false,
+            CheckCertificateRevocationList = false // Optional: slight speed up
+        });
 
         public MusicController(IMusicService musicService)
         {
@@ -42,6 +46,7 @@ namespace backend.Modules.Music.Controllers
         [HttpGet("play/{id}")]
         public async Task ProxyStream(string id)
         {
+            Console.WriteLine($"[MusicProxy] Received request for ID: {id}");
             var url = await _musicService.GetAudioStreamUrlAsync(id);
             if (string.IsNullOrEmpty(url)) {
                 Response.StatusCode = 404;
@@ -51,24 +56,44 @@ namespace backend.Modules.Music.Controllers
             try {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
                 
+                // Forward Range header from the mobile device to YouTube
                 if (Request.Headers.ContainsKey("Range")) {
-                    request.Headers.Add("Range", Request.Headers["Range"].ToString());
+                    request.Headers.TryAddWithoutValidation("Range", Request.Headers["Range"].ToString());
                 }
+
+                // Add YouTube Cookie to bypass bot detection
+                var cookie = Environment.GetEnvironmentVariable("YOUTUBE_COOKIE");
+                if (!string.IsNullOrEmpty(cookie))
+                {
+                    request.Headers.TryAddWithoutValidation("Cookie", cookie);
+                }
+
+                // Set a realistic User-Agent
+                request.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
 
                 using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
                 
+                // Copy Status Code (important for 206 Partial Content)
                 Response.StatusCode = (int)response.StatusCode;
+                
+                // Forward all content headers
                 foreach (var header in response.Content.Headers) {
                     Response.Headers[header.Key] = header.Value.ToArray();
                 }
-                
+
+                // Forward essential response headers
+                if (response.Headers.Contains("Accept-Ranges")) {
+                    Response.Headers["Accept-Ranges"] = "bytes";
+                }
+
+                // Ensure Content-Type is set if missing
                 if (!Response.Headers.ContainsKey("Content-Type")) {
                     Response.ContentType = "audio/mpeg";
                 }
 
                 await response.Content.CopyToAsync(Response.Body);
             } catch (Exception ex) {
-                Console.WriteLine($"Streaming error: {ex.Message}");
+                Console.WriteLine($"Streaming error for {id}: {ex.Message}");
                 if (!Response.HasStarted) Response.StatusCode = 500;
             }
         }
