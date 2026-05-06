@@ -8,23 +8,33 @@ namespace backend.Modules.Music.Services
 {
     public class YoutubeMusicService : IMusicService
     {
+        private static readonly HttpClient _httpClient = CreateHttpClient();
         private readonly YoutubeClient _youtube;
 
-        public YoutubeMusicService()
+        private static HttpClient CreateHttpClient()
         {
-            // UseCookies MUST be false, otherwise .NET ignores our manual Cookie header
             var handler = new HttpClientHandler { UseCookies = false };
-            var httpClient = new HttpClient(handler);
-            httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+            var client = new HttpClient(handler);
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
             
-            // Add YouTube Cookie to bypass bot detection
             var cookie = Environment.GetEnvironmentVariable("YOUTUBE_COOKIE");
             if (!string.IsNullOrEmpty(cookie))
             {
-                httpClient.DefaultRequestHeaders.Add("Cookie", cookie);
+                client.DefaultRequestHeaders.Add("Cookie", cookie);
             }
 
-            _youtube = new YoutubeClient(httpClient);
+            // Support for PO Tokens (Option 2)
+            var poToken = Environment.GetEnvironmentVariable("YOUTUBE_PO_TOKEN");
+            var visitorData = Environment.GetEnvironmentVariable("YOUTUBE_VISITOR_DATA");
+            if (!string.IsNullOrEmpty(poToken)) client.DefaultRequestHeaders.Add("X-YouTube-PO-Token", poToken);
+            if (!string.IsNullOrEmpty(visitorData)) client.DefaultRequestHeaders.Add("X-YouTube-Visitor-Data", visitorData);
+
+            return client;
+        }
+
+        public YoutubeMusicService()
+        {
+            _youtube = new YoutubeClient(_httpClient);
         }
 
         public async Task<IEnumerable<TrackResponse>> SearchTracksAsync(string query, int limit = 20)
@@ -89,6 +99,7 @@ namespace backend.Modules.Music.Services
         {
             try
             {
+                // Try YoutubeExplode first (Highest quality)
                 var streamManifest = await _youtube.Videos.Streams.GetManifestAsync(videoId);
                 
                 // Prioritize mp4 (AAC/M4A) streams for iOS compatibility
@@ -97,13 +108,56 @@ namespace backend.Modules.Music.Services
                     ? m4aStreams.GetWithHighestBitrate() 
                     : streamManifest.GetAudioOnlyStreams().GetWithHighestBitrate();
                 
-                return audioStreamInfo?.Url;
+                if (audioStreamInfo != null) return audioStreamInfo.Url;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"YoutubeExplode Error: {ex.Message}");
+                Console.WriteLine($"YoutubeExplode failed for {videoId}, trying Piped fallback... Error: {ex.Message}");
+            }
+
+            // FALLBACK: Try Piped API (Option 3)
+            // Using a reliable Piped instance
+            return await GetPipedStreamUrlAsync(videoId);
+        }
+
+        private async Task<string?> GetPipedStreamUrlAsync(string videoId)
+        {
+            try
+            {
+                // You can swap this instance if it goes down (e.g., pipedapi.kavin.rocks, piped-api.lunar.icu)
+                string pipedInstance = "https://pipedapi.kavin.rocks"; 
+                string url = $"{pipedInstance}/streams/{videoId}";
+
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode) return null;
+
+                var data = await response.Content.ReadFromJsonAsync<PipedResponse>();
+                
+                // Get the best audio stream
+                var bestAudio = data?.AudioStreams?
+                    .OrderByDescending(s => s.Bitrate)
+                    .FirstOrDefault();
+
+                return bestAudio?.Url;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Piped Fallback Error: {ex.Message}");
                 return null;
             }
         }
+    }
+
+    // DTOs for Piped Response
+    public class PipedResponse
+    {
+        public List<PipedAudioStream>? AudioStreams { get; set; }
+    }
+
+    public class PipedAudioStream
+    {
+        public string? Url { get; set; }
+        public int Bitrate { get; set; }
+        public string? Format { get; set; }
     }
 }
