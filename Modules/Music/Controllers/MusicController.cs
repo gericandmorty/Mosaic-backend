@@ -49,6 +49,7 @@ namespace backend.Modules.Music.Controllers
             Console.WriteLine($"[MusicProxy] Received request for ID: {id}");
             var url = await _musicService.GetAudioStreamUrlAsync(id);
             if (string.IsNullOrEmpty(url)) {
+                Console.WriteLine($"[MusicProxy] FAILED to extract stream URL for ID: {id}. Check YOUTUBE_COOKIE.");
                 Response.StatusCode = 404;
                 return;
             }
