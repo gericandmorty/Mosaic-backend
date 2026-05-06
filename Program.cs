@@ -12,8 +12,8 @@ using System.Threading.RateLimiting;
 // Load environment variables from .env file
 Env.Load();
 
-var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls("http://0.0.0.0:5191");
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5191";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 // Add services to the container.
 builder.Services.AddControllers();
