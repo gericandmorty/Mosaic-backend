@@ -140,8 +140,47 @@ namespace backend.Modules.Music.Services
 
             // FALLBACK 2: Piped Instance B
             Console.WriteLine($"Piped A failed for {videoId}, trying Piped B fallback...");
-            return await GetPipedStreamUrlAsync(videoId, "https://piped-api.lunar.icu");
+            streamUrl = await GetPipedStreamUrlAsync(videoId, "https://piped-api.lunar.icu");
+            if (streamUrl != null) return streamUrl;
+
+            // FALLBACK 3: Cobalt API (The "Nuclear" Option)
+            Console.WriteLine($"Piped B failed for {videoId}, trying Cobalt fallback...");
+            return await GetCobaltStreamUrlAsync(videoId);
         }
+
+        private async Task<string?> GetCobaltStreamUrlAsync(string videoId)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.cobalt.tools/api/json");
+                request.Headers.Add("Accept", "application/json");
+                
+                var payload = new { url = $"https://www.youtube.com/watch?v={videoId}", downloadMode = "audio" };
+                request.Content = JsonContent.Create(payload);
+
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return null;
+
+                var data = await response.Content.ReadFromJsonAsync<CobaltResponse>();
+                if (data?.Status == "stream" || data?.Status == "picker") {
+                    Console.WriteLine($"[MusicProxy] Cobalt fallback SUCCESS for {videoId}");
+                    return data.Url;
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Cobalt Fallback Error: {ex.Message}");
+                return null;
+            }
+        }
+    }
+
+    public class CobaltResponse
+    {
+        public string? Status { get; set; }
+        public string? Url { get; set; }
+    }
 
         private async Task<string?> GetPipedStreamUrlAsync(string videoId, string pipedInstance)
         {
