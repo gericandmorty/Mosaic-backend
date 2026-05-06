@@ -174,13 +174,6 @@ namespace backend.Modules.Music.Services
                 return null;
             }
         }
-    }
-
-    public class CobaltResponse
-    {
-        public string? Status { get; set; }
-        public string? Url { get; set; }
-    }
 
         private async Task<string?> GetPipedStreamUrlAsync(string videoId, string pipedInstance)
         {
@@ -211,7 +204,13 @@ namespace backend.Modules.Music.Services
         }
     }
 
-    // DTOs for Piped Response
+    // DTOs for external API responses
+    public class CobaltResponse
+    {
+        public string? Status { get; set; }
+        public string? Url { get; set; }
+    }
+
     public class PipedResponse
     {
         public List<PipedAudioStream>? AudioStreams { get; set; }
